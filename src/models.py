@@ -3,10 +3,9 @@ db = SQLAlchemy()
 
 class User(db.Model):
     __tablename__ = 'users'
-    id = db.Column(db.Integer, primary_key = True)
-    username = db.Column(db.String(250), nullable=False, unique=True)
-    email = db.Column(db.String(150), nullable=False, unique=True)
-    password = db.Column(db.String (150), nullable=False)
+    id = db.Column(db.Integer, primary_key=True)
+    username=db.Column(db.String(100), nullable=False, unique=True)
+    password=db.Column(db.String(100), nullable=False)
     favorites = db.relationship(
         'Favorite', cascade='all, delete', backref='user', uselist=False
     )
@@ -21,20 +20,20 @@ class User(db.Model):
     def delete(self):
         db.session.delete(self) # DELETE
         db.session.commit() # Guarda el DELETE
+    
+    def check_password(self, password):
+        return safe_str_cmp()
 
     def serialize(self):
         return {
             "id": self.id,
-            "username": self.username,
-            "email": self.email,
-            "password": self.password           
+            "username": self.username          
         }
     
     def serialize_with_favorites(self):
         return {
             "id": self.id,
             "username": self.username,
-            "email": self.email,
             "password": self.password,
             "favorites": {
                 "vehicles": self.favorites.vehicles.serialize(),
@@ -158,6 +157,8 @@ class Favorite(db.Model):
     __tablename__ = 'favorites'
     id = db.Column(db.Integer, primary_key=True)
     users_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+
+    #many to many
     vehicles = db.relationship('Vehicle', secondary='vehicles_favorites')
     characters = db.relationship('Character', secondary='characters_favorites')
     planets = db.relationship('Planet', secondary='planets_favorites')

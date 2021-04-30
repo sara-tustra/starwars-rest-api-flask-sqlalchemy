@@ -1,7 +1,11 @@
 from flask import Flask, json, jsonify, request, render_template
-from flask_migrate import Migrate, MigrateCommand
 from flask_script import Manager 
+from flask_migrate import Migrate, MigrateCommand
 from flask_cors import CORS
+
+from flask_jwt_extended import JWTManager, get_jwt_identity, create_access_token, jwt_required
+from werkzeug.security import generate_password_hash, check_password_hash
+
 from models import db, User, Vehicle, Character, Planet, Favorite, VehicleFavorite, CharacterFavorite, PlanetFavorite
 
 
@@ -11,18 +15,75 @@ app.config['DEBUG'] = True
 app.config['ENV'] = 'development'
 app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:///database.db"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = "33b9b3de94a42d19f47df7021954eaa8"
 
 db.init_app(app)
 Migrate(app, db) #init, migrate, upgrade
 CORS(app)
+jwt=JWTManager(app)
 manager = Manager(app)
 manager.add_command('db', MigrateCommand)
 
 
-@app.route("/")
+@app.route('/')
 def main():
     return render_template('index.html')
 
+@app.route('/login', methods=['POST'])
+def login():
+    username= request.json.get('username')
+    password= request.json.get('password')
+
+    if not username:
+        return jsonify({"fail": "username required"}), 400
+    
+    if not password:
+        return jsonify({"fail": "password required"}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if not user: 
+        return jsonify({"fail": "username or password is incorrect"}), 401
+
+    if not check_password_hash(user.password, password): 
+        return jsonify({"fail": "username or password is incorrect"}), 401
+
+    access_token = create_access_token(identity=username)
+
+    return jsonify({"token": access_token}), 200
+
+@app.route('/register', methods=['POST'])
+def register():
+    username= request.json.get('username')
+    password= request.json.get('password')
+
+    if not username:
+        return jsonify({"fail": "username required"}), 400
+    
+    if not password:
+        return jsonify({"fail": "password required"}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if user: return jsonify({"fail": "username already exists"})
+
+    user = User()
+    user.username = username
+    user.password = generate_password_hash(password)
+    user.save()
+
+    return jsonify({
+        "success": "user created!",
+        "user" :user.serialize()
+    }), 201   
+
+
+@app.route('/profile')
+@jwt_required()
+def profile():
+    current_user = get_jwt_identity()
+    return jsonify({
+        "success": "private route",
+        "user": current_user
+    }), 200    
 
 @app.route('/users', methods=['GET', 'POST'])
 @app.route('/users/<int:id>', methods=['GET', 'PUT', 'DELETE'])
@@ -45,12 +106,15 @@ def users(id=None):
             }), 200
 
     if request.method == 'POST':
-        request_body = request.data
-        decoded_object = json.loads(request_body)
+        username = request.json.get('username')
+        password= request.json.get('password')
+
         user = User()
-        user.username = decoded_object ['username']
-        user.email = decoded_object ['email']
-        user.password = decoded_object ['password']
+        user.username = username
+        user.password = password
+
+        favorite = Favorite()
+        user.favorites = favorite
         user.save()
         return jsonify({
             "success": "user created!",
@@ -78,32 +142,42 @@ def vehicles(id=None):
                 return jsonify({"fail": "Vehicle not found"}), 404
             return jsonify({
                 "success": "Vehicle found",
-                "vehicle": vehicle.serialize_vehicle_with_users()
+                "vehicle": vehicle.serialize()
             }), 200
         else:
             vehicles = Vehicle.query.all()
-            vehicles = list(map(lambda vehicle: vehicle.serialize_vehicle_with_users(), vehicles))
+            vehicles = list(map(lambda vehicle: vehicle.serialize(), vehicles))
             return jsonify({
                 "total": len(vehicles),
                 "results": vehicles
             }), 200
 
     if request.method == 'POST':
-        request_body = request.data
-        decoded_object = json.loads(request_body)
+        name = request.json.get('name')
+        model = request.json.get('model')
+        vehicle_class = request.json.get('vehicle_class')
+        crew = request.json.get('crew')
+        manufacturer = request.json.get('manufacturer')
+        cargo_capacity = request.json.get('cargo_capacity')
+        cost_in_credits = request.json.get('cost_in_credits')
+        consumables = request.json.get('consumables')
+       
+        
+
         vehicle = Vehicle()
-        vehicle.name = decoded_object ['name']
-        vehicle.model = decoded_object ['model']
-        vehicle.vehicle_class = decoded_object ['vehicle_class']
-        vehicle.crew = decoded_object['crew']
-        vehicle.manufacturer = decoded_object['manufacturer']
-        vehicle.cargo_capacity = decoded_object['cargo_capacity']
-        vehicle.cost_in_credits = decoded_object['cost_in_credits']
-        vehicle.consumables = decoded_object['consumables']
+        vehicle.name = name
+        vehicle.model = model
+        vehicle.vehicle_class = vehicle_class
+        vehicle.crew = crew
+        vehicle.manufacturer = manufacturer
+        vehicle.cargo_capacity = cargo_capacity
+        vehicle.cost_in_credits = cost_in_credits
+        vehicle.consumables = consumables
+        
         vehicle.save()
         return jsonify({
             "success": "vehicle created!",
-            "vehicle": vehicle.serialize_vehicle_with_users()
+            "vehicle": vehicle.serialize()
         }), 201
 
     if request.method == 'PUT':
@@ -129,31 +203,38 @@ def characters(id=None):
                 return jsonify({"fail": "Character not found"}), 404
             return jsonify({
                 "success": "Character found",
-                "character": character.serialize_character_with_users()
+                "character": character.serialize()
             }), 200
         else:
             characters = Character.query.all()
-            characters = list(map(lambda character: character.serialize_character_with_users(), characters))
+            characters = list(map(lambda character: character.serialize(), characters))
             return jsonify({
                 "total": len(characters),
                 "results": characters
             }), 200
     if request.method == 'POST':
-        request_body = request.data
-        decoded_object = json.loads(request_body)
+        name = request.json.get('name')
+        gender = request.json.get('gender')
+        hair_color = request.json.get('hair_color')
+        eye_color = request.json.get('eye_color')
+        height = request.json.get('height')
+        skin_color = request.json.get('skin_color')
+        birth_year = request.json.get('birth_year')
+
+
         character = Character()
-        character.name = decoded_object['name']
-        character.gender = decoded_object['gender']
-        character.hair_color = decoded_object['hair_color']
-        character.eye_color = decoded_object['eye_color']
-        character.height = decoded_object['height']
-        character.skin_color = decoded_object['skin_color']
-        character.birth_year = decoded_object['birth_year']
+        character.name = name
+        character.gender = gender
+        character.hair_color = hair_color
+        character.eye_color = eye_color
+        character.height = height
+        character.skin_color = skin_color
+        character.birth_year = birth_year
         character.save()
 
         return jsonify({
             "success": "character created!",
-            "character": character.serialize_character_with_users()
+            "character": character.serialize()
         }), 201
 
     if request.method == 'PUT':
@@ -178,31 +259,39 @@ def planets(id=None):
                 return jsonify({"fail": "Planet not found"}), 404
             return jsonify({
                 "success": "Planet found",
-                "planet": planet.serialize_planet_with_users()
+                "planet": planet.serialize()
             }), 200
         else:
             planets = Planet.query.all()
-            planets = list(map(lambda planet: planet.serialize_planet_with_users(), planets))
+            planets = list(map(lambda planet: planet.serialize(), planets))
             return jsonify({
                 "total": len(planets),
                 "results": planets
             }), 200
 
     if request.method == 'POST':
-        request_body = request.data
-        decoded_object = json.loads(request_body)
+        name = request.json.get('name')
+        population = request.json.get('population')
+        terrain = request.json.get('terrain')
+        climate = request.json.get('climate')
+        rotation_period = request.json.get('rotation_period')
+        orbital_period = request.json.get('orbital_period')
+        gravity = request.json.get('gravity')
+
+
+
         planet = Planet()
-        planet.name = decoded_object['name']
-        planet.population = decoded_object['population']
-        planet.terrain = decoded_object['terrain']
-        planet.climate = decoded_object['climate']
-        planet.rotation_period = decoded_object['rotation_period']
-        planet.orbital_period = decoded_object['orbital_period']
-        planet.gravity = decoded_object['gravity']
+        planet.name = name
+        planet.population = population
+        planet.terrain = terrain
+        planet.climate = climate
+        planet.rotation_period = rotation_period
+        planet.orbital_period = orbital_period
+        planet.gravity = gravity
         planet.save()
         return jsonify({
             "success": "planet created!",
-            "planet": planet.serialize_planet_with_users()
+            "planet": planet.serialize()
         }), 201
 
     if request.method == 'PUT':
@@ -215,13 +304,18 @@ def planets(id=None):
         return jsonify({"success": "planet deleted"}), 200
 
 
-
+###################
+###################
+###################
         
 
 @app.route('/users/<int:user_id>/favorites', methods=['GET', 'POST', 'DELETE'])
 def favorites(user_id=None):
     if request.method == 'GET':
         if user_id is not None:
+            users = User.query.all()
+            if user_id > len(users):
+                return jsonify({ "fail": "user does not exist" }), 404
             user = User.query.get(user_id)
             if not user.favorites:
                 return jsonify({ "fail": "user does not have favorites" }), 404
@@ -233,48 +327,37 @@ def favorites(user_id=None):
         else:
             users= User.query.all()
             users = list(
-                map(lambda user_favs: user.serialize_with_favorites(), users)
+                map(lambda user_favs: user.serialize(), users)
             )
 
     if request.method == 'POST':
-        if user_id is None:
-            return jsonify({"fail": "please indicate a valid user"})
-        
-        vehicles = request.json.get('vehicles')
-        characters = request.json.get('characters')
-        planets = request.json.get('planets')
+      
+        id_vehicle = request.json.get('id_vehicle',)
+        id_character = request.json.get('id_character')
+        id_planet = request.json.get('id_planet')
 
-        user = User() #Preguntar al profe
+        user = User.query.filter_by(id = user_id).first()
+        if not user:
+            return jsonify({"fail": "the indicated user does not exist"})
+            
+        vehicle = Vehicle.query.filter_by(id= id_vehicle).first()
+        character = Character.query.filter_by(id=id_character).first()
+        planet = Planet.query.filter_by(id=id_planet).first()
+
         favorite = Favorite()
-        for vehicle_id in vehicles:
-            vehicle = Vehicle.query.get(vehicle_id)
-            favorite.vehicles.append(vehicle)
+        user.favorites = favorite
+        favorite.vehicles.append(vehicle)
+        favorite.characters.append(character)
+        favorite.planets.append(planet)
 
-        for character_id in characters:
-            character = Character.query.get(character_id)
-            favorite.characters.append(character)
-
-        for planet_id in planets:
-            planet = Planet.query.get(planet_id)
-            favorite.planets.append(planet)
-
-
-        user.favorites = favorites
         favorite.save()
-        user.save()
+        user.update()
 
-        
         return jsonify({
             "success": "favorites added",
-            "user": user.serialize_with_favorites()
+            "favorites": favorite.serialize()
         })
 
-    
-
-
-
-            
 
 if __name__ == '__main__':
-    # app.run(host='0.0.0.0', port=3245, debug=True)
     manager.run()
